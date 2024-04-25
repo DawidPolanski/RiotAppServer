@@ -1,6 +1,4 @@
-import * as dotenv from "dotenv";
-
-dotenv.config();
+require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
@@ -12,7 +10,8 @@ const port = 3001;
 app.use(cors());
 
 const API_KEY = process.env.API_KEY;
-const region = "EUN1";
+
+// const region = "EUN1";
 
 app.get("/summonerData/:gameName/:tagLine", async (req, res) => {
   const { gameName, tagLine } = req.params;
@@ -37,7 +36,7 @@ app.get("/summonerMatch/:puuid", async (req, res) => {
 
   try {
     const response = await axios.get(
-      `https://europe.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids?start=0&count=20`,
+      `https://europe.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids?start=0&count=30`,
       { headers: { "X-Riot-Token": API_KEY } }
     );
     const summonerMatch = response.data;
@@ -45,6 +44,22 @@ app.get("/summonerMatch/:puuid", async (req, res) => {
   } catch (error) {
     console.error("Error fetching summoner match data:", error.message);
     res.status(500).json({ error: "Error fetching summoner match data" });
+  }
+});
+
+app.get("/specificMatch/:matchId", async (req, res) => {
+  const { matchId } = req.params;
+
+  try {
+    const response = await axios.get(
+      `https://europe.api.riotgames.com/lol/match/v5/matches/${matchId}`,
+      { headers: { "X-Riot-Token": API_KEY } }
+    );
+    const specificMatch = response.data;
+    res.json(specificMatch);
+  } catch (error) {
+    console.error("Error fetching specific match data:", error.message);
+    res.status(500).json({ error: "Error fetching specific match data" });
   }
 });
 
