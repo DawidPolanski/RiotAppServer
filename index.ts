@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
@@ -9,67 +11,76 @@ app.use(cors());
 
 const API_KEY = process.env.API_KEY;
 
-app.get("/summonerData", async (req, res) => {
-  const { summoners } = req.query;
+app.get(
+  "/summonerAndMatchData/:summonerName/:summonerTagLine/:opponentName/:opponentTagLine",
+  async (req, res) => {
+    const { summonerName, summonerTagLine, opponentName, opponentTagLine } =
+      req.params;
 
-  try {
-    const promises = summoners.map(async (summoner) => {
-      const { gameName, tagLine } = summoner;
-      const encodedTagLine = encodeURIComponent(tagLine);
+    try {
+      const [summonerData, opponentData, summonerMatches, opponentMatches] =
+        await Promise.all([
+          fetchSummonerData(summonerName, summonerTagLine),
+          fetchSummonerData(opponentName, opponentTagLine),
+          fetchSummonerMatches(summonerName, summonerTagLine),
+          fetchSummonerMatches(opponentName, opponentTagLine),
+        ]);
 
-      const response = await axios.get(
-        `https://europe.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${gameName}/${encodedTagLine}`,
-        { headers: { "X-Riot-Token": API_KEY } }
-      );
+      const commonMatches = findCommonMatches(summonerMatches, opponentMatches);
 
-      return response.data;
-    });
+      if (commonMatches.length === 0) {
+        throw new Error("Brak wspólnych meczów dla obu przywoływaczy.");
+      }
 
-    const summonerData = await Promise.all(promises);
-    res.json(summonerData);
-  } catch (error) {
-    console.error("Error fetching summoner data:", error.message);
-    res.status(500).json({ error: "Error fetching summoner data" });
+      const matchDetails = await fetchMatchDetails(commonMatches);
+
+      const responseData = {
+        summonerData,
+        opponentData,
+        commonMatches,
+        specificMatch: matchDetails,
+      };
+
+      res.json(responseData);
+    } catch (error) {
+      console.error("Error fetching data:", error.message);
+      res.status(500).json({ error: "Error fetching data" });
+    }
   }
-});
+);
 
-app.get("/summonerMatch", async (req, res) => {
-  const { puuids } = req.query;
+async function fetchSummonerData(gameName, tagLine) {
+  const encodedTagLine = encodeURIComponent(tagLine);
+  const response = await axios.get(
+    `https://europe.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${gameName}/${encodedTagLine}`,
+    { headers: { "X-Riot-Token": API_KEY } }
+  );
+  return response.data;
+}
 
-  try {
-    const promises = puuids.map(async (puuid) => {
-      const response = await axios.get(
-        `https://europe.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids?start=0&count=100`,
-        { headers: { "X-Riot-Token": API_KEY } }
-      );
+async function fetchSummonerMatches(gameName, tagLine) {
+  const summonerData = await fetchSummonerData(gameName, tagLine);
+  const response = await axios.get(
+    `https://europe.api.riotgames.com/lol/match/v5/matches/by-puuid/${summonerData.puuid}/ids?start=0&count=100`,
+    { headers: { "X-Riot-Token": API_KEY } }
+  );
+  return response.data;
+}
 
-      return response.data;
-    });
-
-    const summonerMatches = await Promise.all(promises);
-    res.json(summonerMatches);
-  } catch (error) {
-    console.error("Error fetching summoner match data:", error.message);
-    res.status(500).json({ error: "Error fetching summoner match data" });
-  }
-});
-
-app.get("/specificMatch/:matchId", async (req, res) => {
-  const { matchId } = req.params;
-
-  try {
+async function fetchMatchDetails(matchIds) {
+  const matchDetailsPromises = matchIds.map(async (matchId) => {
     const response = await axios.get(
       `https://europe.api.riotgames.com/lol/match/v5/matches/${matchId}`,
       { headers: { "X-Riot-Token": API_KEY } }
     );
+    return response.data;
+  });
+  return await Promise.all(matchDetailsPromises);
+}
 
-    const specificMatch = response.data;
-    res.json(specificMatch);
-  } catch (error) {
-    console.error("Error fetching specific match data:", error.message);
-    res.status(500).json({ error: "Error fetching specific match data" });
-  }
-});
+function findCommonMatches(matches1, matches2) {
+  return matches1.filter((match) => matches2.includes(match));
+}
 
 app.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);
