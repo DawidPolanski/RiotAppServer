@@ -31,10 +31,14 @@ app.get(
       if (commonMatches.length === 0) {
         throw new Error("Brak wspólnych meczów dla obu przywoływaczy.");
       }
+      const opponentLeagueData = await fetchOpponentLeagueData(
+        opponentData.puuid
+      );
 
       const matchDetails = await fetchMatchDetails(commonMatches);
 
       const responseData = {
+        opponentLeagueData,
         summonerData,
         opponentData,
         commonMatches,
@@ -65,6 +69,28 @@ async function fetchSummonerMatches(gameName, tagLine) {
     { headers: { "X-Riot-Token": API_KEY } }
   );
   return response.data;
+}
+
+async function fetchOpponentLeagueData(puuid) {
+  try {
+    const summonerResponse = await axios.get(
+      `https://eun1.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/${puuid}`,
+      { headers: { "X-Riot-Token": API_KEY } }
+    );
+    const { id } = summonerResponse.data;
+
+    const leagueResponse = await axios.get(
+      `https://eun1.api.riotgames.com/lol/league/v4/entries/by-summoner/${id}`,
+      { headers: { "X-Riot-Token": API_KEY } }
+    );
+
+    const leagueData = leagueResponse.data;
+
+    return leagueData;
+  } catch (error) {
+    console.error("Error fetching opponent league data:", error.message);
+    return null;
+  }
 }
 
 async function fetchMatchDetails(matchIds) {
