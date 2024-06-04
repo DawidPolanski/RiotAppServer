@@ -20,6 +20,25 @@ const limiter = new Bottleneck({
   maxConcurrent: 1,
 });
 
+const platformRegions = {
+  KR: { region: "asia.api.riotgames.com", url: "kr.api.riotgames.com" },
+  EUW: { region: "europe.api.riotgames.com", url: "euw1.api.riotgames.com" },
+  EUNE: { region: "europe.api.riotgames.com", url: "eun1.api.riotgames.com" },
+  BR: { region: "americas.api.riotgames.com", url: "br1.api.riotgames.com" },
+  JP: { region: "asia.api.riotgames.com", url: "jp1.api.riotgames.com" },
+  LA1: { region: "americas.api.riotgames.com", url: "la1.api.riotgames.com" },
+  LA2: { region: "americas.api.riotgames.com", url: "la2.api.riotgames.com" },
+  OC: { region: "sea.api.riotgames.com", url: "oc1.api.riotgames.com" },
+  NA: { region: "americas.api.riotgames.com", url: "na1.api.riotgames.com" },
+  TR: { region: "europe.api.riotgames.com", url: "tr1.api.riotgames.com" },
+  RU: { region: "europe.api.riotgames.com", url: "ru.api.riotgames.com" },
+  PH: { region: "sea.api.riotgames.com", url: "ph2.api.riotgames.com" },
+  SG: { region: "sea.api.riotgames.com", url: "sg2.api.riotgames.com" },
+  TH: { region: "sea.api.riotgames.com", url: "th2.api.riotgames.com" },
+  TW: { region: "asia.api.riotgames.com", url: "tw2.api.riotgames.com" },
+  VN: { region: "sea.api.riotgames.com", url: "vn2.api.riotgames.com" },
+};
+
 let requestCount = 0;
 
 function incrementRequestCount(url) {
@@ -37,20 +56,26 @@ app.get(
   async (req, res) => {
     const { summonerName, summonerTagLine, opponentName, opponentTagLine } =
       req.params;
+    const { region } = req.query;
+    const platform = platformRegions[region];
 
     try {
       const [summonerData, opponentData] = await Promise.all([
         limiter.schedule(() =>
-          fetchSummonerData(summonerName, summonerTagLine)
+          fetchSummonerData(summonerName, summonerTagLine, platform)
         ),
         limiter.schedule(() =>
-          fetchSummonerData(opponentName, opponentTagLine)
+          fetchSummonerData(opponentName, opponentTagLine, platform)
         ),
       ]);
 
       const [summonerMatches, opponentMatches] = await Promise.all([
-        limiter.schedule(() => fetchSummonerMatches(summonerData.puuid, 200)),
-        limiter.schedule(() => fetchSummonerMatches(opponentData.puuid, 200)),
+        limiter.schedule(() =>
+          fetchSummonerMatches(summonerData.puuid, 200, platform)
+        ),
+        limiter.schedule(() =>
+          fetchSummonerMatches(opponentData.puuid, 200, platform)
+        ),
       ]);
 
       const commonMatches = findCommonMatches(summonerMatches, opponentMatches);
@@ -60,10 +85,10 @@ app.get(
       }
 
       const opponentLeagueData = await limiter.schedule(() =>
-        fetchOpponentLeagueData(opponentData.puuid)
+        fetchOpponentLeagueData(opponentData.puuid, platform)
       );
 
-      const matchDetails = await fetchMatchDetails(commonMatches);
+      const matchDetails = await fetchMatchDetails(commonMatches, platform);
 
       const responseData = {
         opponentLeagueData,
@@ -81,14 +106,14 @@ app.get(
   }
 );
 
-async function fetchSummonerData(gameName, tagLine) {
+async function fetchSummonerData(gameName, tagLine, platform) {
   const cacheKey = `${gameName}-${tagLine}`;
   if (summonerCache.has(cacheKey)) {
     console.log(`Cache hit for summoner data: ${cacheKey}`);
     return summonerCache.get(cacheKey);
   }
   const encodedTagLine = encodeURIComponent(tagLine);
-  const url = `https://europe.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${gameName}/${encodedTagLine}`;
+  const url = `https://${platform.region}/riot/account/v1/accounts/by-riot-id/${gameName}/${encodedTagLine}`;
   logRequestDetails(url);
   const response = await axios.get(url, {
     headers: { "X-Riot-Token": API_KEY },
@@ -98,7 +123,7 @@ async function fetchSummonerData(gameName, tagLine) {
   return response.data;
 }
 
-async function fetchSummonerMatches(puuid, totalMatches = 100) {
+async function fetchSummonerMatches(puuid, totalMatches = 100, platform) {
   let allMatches = [];
   const matchCountPerRequest = 100;
   let start = 0;
@@ -108,7 +133,7 @@ async function fetchSummonerMatches(puuid, totalMatches = 100) {
       matchCountPerRequest,
       totalMatches - allMatches.length
     );
-    const url = `https://europe.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids?start=${start}&count=${count}`;
+    const url = `https://${platform.region}/lol/match/v5/matches/by-puuid/${puuid}/ids?start=${start}&count=${count}`;
     logRequestDetails(url);
     const response = await axios.get(url, {
       headers: { "X-Riot-Token": API_KEY },
@@ -126,13 +151,13 @@ async function fetchSummonerMatches(puuid, totalMatches = 100) {
   return allMatches;
 }
 
-async function fetchOpponentLeagueData(puuid) {
+async function fetchOpponentLeagueData(puuid, platform) {
   if (leagueCache.has(puuid)) {
     console.log(`Cache hit for league data: ${puuid}`);
     return leagueCache.get(puuid);
   }
   try {
-    const summonerUrl = `https://eun1.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/${puuid}`;
+    const summonerUrl = `https://${platform.url}/lol/summoner/v4/summoners/by-puuid/${puuid}`;
     logRequestDetails(summonerUrl);
     const summonerResponse = await axios.get(summonerUrl, {
       headers: { "X-Riot-Token": API_KEY },
@@ -140,7 +165,7 @@ async function fetchOpponentLeagueData(puuid) {
     incrementRequestCount(summonerUrl);
     const { id } = summonerResponse.data;
 
-    const leagueUrl = `https://eun1.api.riotgames.com/lol/league/v4/entries/by-summoner/${id}`;
+    const leagueUrl = `https://${platform.url}/lol/league/v4/entries/by-summoner/${id}`;
     logRequestDetails(leagueUrl);
     const leagueResponse = await axios.get(leagueUrl, {
       headers: { "X-Riot-Token": API_KEY },
@@ -157,13 +182,13 @@ async function fetchOpponentLeagueData(puuid) {
   }
 }
 
-async function fetchMatchDetails(matchIds) {
+async function fetchMatchDetails(matchIds, platform) {
   const matchDetailsPromises = matchIds.map(async (matchId) => {
     if (matchCache.has(matchId)) {
       console.log(`Cache hit for match details: ${matchId}`);
       return matchCache.get(matchId);
     }
-    const url = `https://europe.api.riotgames.com/lol/match/v5/matches/${matchId}`;
+    const url = `https://${platform.region}/lol/match/v5/matches/${matchId}`;
     logRequestDetails(url);
     const response = await limiter.schedule(() =>
       axios.get(url, { headers: { "X-Riot-Token": API_KEY } })
